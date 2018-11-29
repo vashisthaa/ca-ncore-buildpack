@@ -59,7 +59,6 @@ func (s *Supplier) Run() error {
 	// 	return err
 	// }
 
-// err = libbuildpack.ExtractZip(filepath.Join(s.Stager.DepDir(), "apm.zip"), filepath.Join(s.Stager.DepDir(), "apm"))
 	err = libbuildpack.ExtractZip(filepath.Join(s.Stager.DepDir(), "apm.zip"), filepath.Join(s.Stager.DepDir(), "../../","apm"))
 	//todo delete apm.zip
 
@@ -71,44 +70,22 @@ func (s *Supplier) Run() error {
 
 	// err = libbuildpack.CopyFile(filepath.Join(s.Stager.DepDir(), "../../apm/wily/"), filepath.Join(s.Stager.DepDir(), "../../wily/"))
 
-	// err = os.Mkdir(filepath.Join(s.Stager.DepDir(), "profile.d"), 0777)
-
-	// if err != nil {
-	// 	return err
-	// }
-	
-	err = ioutil.WriteFile(filepath.Join(s.Stager.DepDir(), "../../apm.sh"), []byte(`
-			echo "running apm.sh"	
-			export COR_ENABLE_PROFILING="1"
-			export COR_PROFILER="{5F048FC6-251C-4684-8CCA-76047B02AC98}"
-			export COR_PROFILER_PATH_64="/home/vcap/apm/wily/bin/wily.NativeProfiler.so"
-			export com.wily.introscope.AgentProfile="home/vcap/apm/wily/IntroscopeAgent.profile"
-			echo "finished running apm.sh"
-			`), 0666)
-
-	
-	err = s.Command.Execute(filepath.Join(s.Stager.DepDir(), "../../"), os.Stdout, os.Stderr, filepath.Join(s.Stager.DepDir(), "../../", "apm.sh"))
+	err = os.Mkdir(filepath.Join(s.Stager.DepDir(), "profile.d"), 0777)
 
 	if err != nil {
 		return err
 	}
-
-	/*
-	err = ioutil.WriteFile(filepath.Join(s.Stager.DepDir(), "bin", "apm_start_wrapper.bat"), []byte(`
-			echo "running apm_start_wrapper.bat"
-			export COR_ENABLE_PROFILING="1"
-			export COR_PROFILER="{5F048FC6-251C-4684-8CCA-76047B02AC98}"
-			export COR_PROFILER_PATH_64="C:\Users\vcap\deps\0\apm\content\wily\bin\wily.NativeProfiler.dll"
-			export com.wily.introscope.AgentProfile="C:\Users\vcap\deps\0\apm\content\wily\IntroscopeAgent.profile"
-			echo "finished running apm_start_wrapper.bat"
-			.cloudfoundry\hwc.exe
-			`), 0666)
-
-	// err = s.Command.Execute(".", os.Stdout, os.Stderr, filepath.Join(s.Stager.DepDir(), "apm.bat"))
+	
+	err = ioutil.WriteFile(filepath.Join(s.Stager.DepDir(), "profile.d/apm.sh"), []byte(`
+		export CORECLR_ENABLE_PROFILING=1
+		export CORECLR_PROFILER={5F048FC6-251C-4684-8CCA-76047B02AC98}
+		export CORECLR_PROFILER_PATH=/home/vcap/apm/wily/bin/wily.NativeProfiler.so
+		export APMENV_AGENT_PROFILE=/home/vcap/apm/wily/IntroscopeAgent.profile
+		`), 0666)
 
 	if err != nil {
 		return err
-	}*/
+	}
 
 	return nil
 }
