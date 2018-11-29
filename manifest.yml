@@ -3,14 +3,16 @@ language: ca-ncore
 default_versions:
 dependency_deprecation_dates:
 dependencies:
-
+- name: apm
+  version: 10.6.0
+  uri: https://ca.bintray.com/ncore/dotnet-agent-linux.zip
+  sha256: f42d876ead39032465195f9df3afa61f6a7f39eedd49c67b1d76e96c57605371
+  cf_stacks: [cflinuxfs2]
 include_files:
   - README.md
   - VERSION
   - bin/detect
   - bin/compile
   - bin/supply
-  - bin/finalize
-  - bin/release
   - manifest.yml
 pre_package: scripts/build.sh
