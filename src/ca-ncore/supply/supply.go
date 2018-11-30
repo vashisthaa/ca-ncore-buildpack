@@ -3,11 +3,14 @@ package supply
 import (
 	"io"
 	"bufio"
+	"bytes"
 	"path/filepath"
 	"github.com/cloudfoundry/libbuildpack"
 	"encoding/json"
 	"strings"
+	"strconv"
 	"fmt"
+	"errors"
 	"os"
 	"io/ioutil"
 )
@@ -59,40 +62,28 @@ func (s *Supplier) Run() error {
 	
 	// Resolve the EM URL
 	var agentManagerURL string
-	
-	// Parse Services
-	var services map[string]interface{}
-	serviceBytes := []byte(os.Getenv("VCAP_SERVICES"))
-	if err := json.Unmarshal(serviceBytes, &services); err != nil {
-		return err
-	}
-	
-	for _, serviceArrayObj  := range services {
-		serviceArray := serviceArrayObj.([]interface{})
-		for _, serviceObj := range serviceArray {
-			service := serviceObj.(map[string]interface{})
-			serviceName := service["name"].(string)
-			
-			// Match an introscope service name
-			if strings.EqualFold(serviceName, "introscope") {
-				emCredentials := service["credentials"].(map[string]interface{})
-				agentManagerURL = emCredentials["url"].(string)
-				s.Log.Info("Resolved EM URL: %s", agentManagerURL)
-				break
-			}
-		}
+	credentials := GetIntroscopeCredentials(s)
+	if credentials != nil {
+		agentManagerURL = credentials["url"].(string)
 	}
 	
 	if agentManagerURL == "" {
 		s.Log.Error("Failed to determine EM URL")
-		return nil
+		return errors.New("Failed to determine EM URL")
 	}
 	
-	// Update the value of agentManager.url in the IntroscopeAgent.profile
-	if err := UpdateAgentProperty(s, "agentManager.url.1", agentManagerURL); err != nil {
-		return err
+	// Update all properties in credentials
+	for key, valueObj := range credentials {
+		if key == "url" {
+			key = "agentManager.url.1"
+		}
+		
+		s.Log.Info("Setting profile property %s", key)
+		if err := UpdateAgentProperty(s, key, valueObj.(string)); err != nil {
+			return err
+		}
 	}
-
+	
 	return nil
 }
 
@@ -131,30 +122,86 @@ func WriteProfileScript(s *Supplier) error {
 	return nil
 }
 
+func GetIntroscopeCredentials(s *Supplier) map[string]interface{} {
+		// Parse Services
+	var services map[string]interface{}
+	serviceBytes := []byte(os.Getenv("VCAP_SERVICES"))
+	if err := json.Unmarshal(serviceBytes, &services); err != nil {
+		return nil
+	}
+	
+	for _, serviceArrayObj  := range services {
+		serviceArray := serviceArrayObj.([]interface{})
+		for _, serviceObj := range serviceArray {
+			service := serviceObj.(map[string]interface{})
+			serviceName := service["name"].(string)
+			
+			// Match an introscope service name
+			if strings.EqualFold(serviceName, "introscope") {
+				emCredentials := service["credentials"].(map[string]interface{})
+				
+				return emCredentials
+			}
+		}
+	}
+	
+	return nil
+}
+
 func UpdateAgentProperty(s *Supplier, key string, value string) error {
 	profilePath := filepath.Join(s.Stager.DepDir(), "../../apm/wily/IntroscopeAgent.profile")
-	tempProfilePath := filepath.Join(s.Stager.DepDir(), "temp_IntroscopeAgent.profile")
 	
-	// Create a copy of the current profile
-	if err := libbuildpack.CopyFile(profilePath, tempProfilePath); err != nil {
-		return err
-	}
+	// Check if the key exists
+	var grepBuff bytes.Buffer
+	grepWriter := bufio.NewWriter(&grepBuff)
+	_ = s.Command.Execute(s.Stager.DepDir(), grepWriter, os.Stderr, 
+		"/bin/grep", "-c", fmt.Sprintf("^%s=", key), profilePath)
 	
-	// Create a buffered writer for the profile output
-	profileFile, err := os.Create(profilePath)
+	keyCount, err := strconv.Atoi(strings.TrimSpace(grepBuff.String()))
 	if err != nil {
+		s.Log.Error("grep failed: %s", grepBuff.String())
 		return err
 	}
 	
-	profileWriter := bufio.NewWriter(profileFile)
+	//s.Log.Info("Count for %s = %d", key, keyCount)
+	if keyCount > 0 {
+		// Replace the existing value
+		
+		// Create a copy of the current profile
+		tempProfilePath := filepath.Join(s.Stager.DepDir(), "temp_IntroscopeAgent.profile")
+		
+		if err := libbuildpack.CopyFile(profilePath, tempProfilePath); err != nil {
+			return err
+		}
 	
-	// Replace the value
-	if err := s.Command.Execute(s.Stager.DepDir(), profileWriter, os.Stderr, 
-		"/bin/sed", fmt.Sprintf("s/%s=.*/%s=%s/", key, key, value), tempProfilePath); err != nil {
-		return err
+		// Create a buffered writer for the profile output
+		profileFile, err := os.Create(profilePath)
+		if err != nil {
+			return err
+		}
+	
+		profileWriter := bufio.NewWriter(profileFile)
+	
+		// Replace the value
+		if err := s.Command.Execute(s.Stager.DepDir(), profileWriter, os.Stderr, 
+			"/bin/sed", fmt.Sprintf("s/^%s=.*/%s=%s/", key, key, value), tempProfilePath); err != nil {
+			return err
+		}
+	
+		profileWriter.Flush()
+	} else {
+		// Append the new key/value
+		fileHandle, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return err
+		}
+		defer fileHandle.Close()
+		writer := bufio.NewWriter(fileHandle)
+		
+
+		fmt.Fprintln(writer, fmt.Sprintf("\n%s=%s", key, value))
+		writer.Flush()
 	}
-	
-	profileWriter.Flush()
 	
 	return nil
 }
