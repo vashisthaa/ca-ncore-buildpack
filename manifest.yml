@@ -7,7 +7,9 @@ dependencies:
   version: 10.6.0
   uri: https://ca.bintray.com/ncore/dotnet-agent-linux.zip
   sha256: f42d876ead39032465195f9df3afa61f6a7f39eedd49c67b1d76e96c57605371
-  cf_stacks: [cflinuxfs2]
+  cf_stacks:
+  - cflinuxfs2
+  - cflinuxfs3
 include_files:
   - README.md
   - VERSION
