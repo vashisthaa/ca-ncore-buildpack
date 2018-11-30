@@ -2,8 +2,12 @@ package supply
 
 import (
 	"io"
+	"bufio"
 	"path/filepath"
 	"github.com/cloudfoundry/libbuildpack"
+	"encoding/json"
+	"strings"
+	"fmt"
 	"os"
 	"io/ioutil"
 )
@@ -45,47 +49,113 @@ type Supplier struct {
 func (s *Supplier) Run() error {
 	s.Log.BeginStep("Supplying ca-ncore")
 
-	// TODO: Install any dependencies here...
-	
-	err := s.Installer.FetchDependency(libbuildpack.Dependency{Name: "apm", Version: "10.6.0"}, filepath.Join(s.Stager.DepDir(), "apm.zip"))
-	
-	if err != nil {
+	if err := DownloadAgent(s); err != nil {
 		return err
 	}
 
-	// bpDir, err := libbuildpack.GetBuildpackDir()
-
-	// if err != nil {
-	// 	return err
-	// }
-
-	err = libbuildpack.ExtractZip(filepath.Join(s.Stager.DepDir(), "apm.zip"), filepath.Join(s.Stager.DepDir(), "../../","apm"))
-	//todo delete apm.zip
-
-	if err != nil {
-		return err
-	}
-
-	// err = libbuildpack.CopyFile(filepath.Join(bpDir, "IntroscopeAgent.profile"), filepath.Join(s.Stager.DepDir(), "apm", "content", "wily", "IntroscopeAgent.profile"))
-
-	// err = libbuildpack.CopyFile(filepath.Join(s.Stager.DepDir(), "../../apm/wily/"), filepath.Join(s.Stager.DepDir(), "../../wily/"))
-
-	err = os.Mkdir(filepath.Join(s.Stager.DepDir(), "profile.d"), 0777)
-
-	if err != nil {
+	if err := WriteProfileScript(s); err != nil {
 		return err
 	}
 	
-	err = ioutil.WriteFile(filepath.Join(s.Stager.DepDir(), "profile.d/apm.sh"), []byte(`
-		export CORECLR_ENABLE_PROFILING=1
-		export CORECLR_PROFILER={5F048FC6-251C-4684-8CCA-76047B02AC98}
-		export CORECLR_PROFILER_PATH=/home/vcap/apm/wily/bin/wily.NativeProfiler.so
-		export APMENV_AGENT_PROFILE=/home/vcap/apm/wily/IntroscopeAgent.profile
-		`), 0666)
-
-	if err != nil {
+	// Resolve the EM URL
+	var agentManagerURL string
+	
+	// Parse Services
+	var services map[string]interface{}
+	serviceBytes := []byte(os.Getenv("VCAP_SERVICES"))
+	if err := json.Unmarshal(serviceBytes, &services); err != nil {
+		return err
+	}
+	
+	for _, serviceArrayObj  := range services {
+		serviceArray := serviceArrayObj.([]interface{})
+		for _, serviceObj := range serviceArray {
+			service := serviceObj.(map[string]interface{})
+			serviceName := service["name"].(string)
+			
+			// Match an introscope service name
+			if strings.EqualFold(serviceName, "introscope") {
+				emCredentials := service["credentials"].(map[string]interface{})
+				agentManagerURL = emCredentials["url"].(string)
+				s.Log.Info("Resolved EM URL: %s", agentManagerURL)
+				break
+			}
+		}
+	}
+	
+	if agentManagerURL == "" {
+		s.Log.Error("Failed to determine EM URL")
+		return nil
+	}
+	
+	// Update the value of agentManager.url in the IntroscopeAgent.profile
+	if err := UpdateAgentProperty(s, "agentManager.url.1", agentManagerURL); err != nil {
 		return err
 	}
 
 	return nil
 }
+
+func DownloadAgent(s *Supplier) error {
+	
+	// Download the agent zip
+	agentZip := filepath.Join(s.Stager.DepDir(), "apm.zip")
+	
+	if err := s.Installer.FetchDependency(libbuildpack.Dependency{Name: "apm", Version: "10.6.0"}, agentZip); err != nil {
+		return err
+	}
+
+	if err := libbuildpack.ExtractZip(agentZip, filepath.Join(s.Stager.DepDir(), "../../","apm")); err != nil {
+		return err
+	}
+	
+	return nil
+}
+
+func WriteProfileScript(s *Supplier) error {
+	
+	// Write APM startup script to profile.d 
+	if err := os.Mkdir(filepath.Join(s.Stager.DepDir(), "profile.d"), 0777); err != nil {
+		return err
+	}
+	
+	if err := ioutil.WriteFile(filepath.Join(s.Stager.DepDir(), "profile.d/apm.sh"), []byte(`
+		export CORECLR_ENABLE_PROFILING=1
+		export CORECLR_PROFILER={5F048FC6-251C-4684-8CCA-76047B02AC98}
+		export CORECLR_PROFILER_PATH=/home/vcap/apm/wily/bin/wily.NativeProfiler.so
+		export APMENV_AGENT_PROFILE=/home/vcap/apm/wily/IntroscopeAgent.profile
+		`), 0666); err != nil {
+		return err
+	}
+	
+	return nil
+}
+
+func UpdateAgentProperty(s *Supplier, key string, value string) error {
+	profilePath := filepath.Join(s.Stager.DepDir(), "../../apm/wily/IntroscopeAgent.profile")
+	tempProfilePath := filepath.Join(s.Stager.DepDir(), "temp_IntroscopeAgent.profile")
+	
+	// Create a copy of the current profile
+	if err := libbuildpack.CopyFile(profilePath, tempProfilePath); err != nil {
+		return err
+	}
+	
+	// Create a buffered writer for the profile output
+	profileFile, err := os.Create(profilePath)
+	if err != nil {
+		return err
+	}
+	
+	profileWriter := bufio.NewWriter(profileFile)
+	
+	// Replace the value
+	if err := s.Command.Execute(s.Stager.DepDir(), profileWriter, os.Stderr, 
+		"/bin/sed", fmt.Sprintf("s/%s=.*/%s=%s/", key, key, value), tempProfilePath); err != nil {
+		return err
+	}
+	
+	profileWriter.Flush()
+	
+	return nil
+}
+
