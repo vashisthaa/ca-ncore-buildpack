@@ -6,14 +6,14 @@ dependencies:
 - name: apm
   version: 10.6.0
   uri: https://sinva01.bintray.com/ncore/dotnet-agent-linux.zip
-  sha256: 78409e1af1d43ae0bada4bba7e0949cac36a970494600a22f24fe9041452b55b
+  sha256: 1f35e0ee20e97e9ec87bc6e1489e6b4bf906d6c6f4ed552806fe41304861346e
   cf_stacks:
   - cflinuxfs2
   - cflinuxfs3
 - name: apm
   version: 10.7.0
   uri: https://sinva01.bintray.com/ncore/dotnet-agent-linux.zip
-  sha256: 78409e1af1d43ae0bada4bba7e0949cac36a970494600a22f24fe9041452b55b
+  sha256: 1f35e0ee20e97e9ec87bc6e1489e6b4bf906d6c6f4ed552806fe41304861346e
   cf_stacks:
   - cflinuxfs2
   - cflinuxfs3
